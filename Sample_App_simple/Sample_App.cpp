@@ -18,11 +18,44 @@
 #include "Sample_App.hpp"
 
 
-struct node{
-  uint32_t id;
-  uint32_t data;
-  struct node *left, *right;
-};
+Oram* create_oram(uint32_t MAX_BLOCKS, uint32_t DATA_SIZE, uint32_t STASH_SIZE, uint32_t OBLIVIOUS_FLAG, uint32_t RECURSION_DATA_SIZE, uint32_t ORAM_TYPE, uint32_t Z){
+  //create a new oram, referrable to its zerotrace_id (zt_id)
+  //it's unclear if multiple orams is even supported though...
+  uint32_t zt_id = ZT_New(MAX_BLOCKS, DATA_SIZE, STASH_SIZE, OBLIVIOUS_FLAG, RECURSION_DATA_SIZE, ORAM_TYPE, Z);
+  
+  uint32_t enc_request_size = computeCiphertextSize(DATA_SIZE);
+  unsigned char *enc_request = (unsigned char *) malloc (enc_request_size);				
+  unsigned char *enc_response = (unsigned char *) malloc (DATA_SIZE);
+  //in_tag and out_tag are used for authenticated encryption
+  unsigned char *in_tag = (unsigned char*) malloc (TAG_SIZE);
+  unsigned char *out_tag = (unsigned char*) malloc (TAG_SIZE);
+  //the encryption utility function appears to need pointers to in_data and out_data even when it doesn't make sense...
+  unsigned char *dummy_in_data  = (unsigned char*) malloc (DATA_SIZE);
+  unsigned char *dummy_out_data  = (unsigned char*) malloc (DATA_SIZE);
+
+  Oram *oram = (Oram*)malloc(sizeof(Oram));
+  oram-> enc_request = enc_request;
+  oram-> enc_response = enc_response;
+  oram -> dummy_in_data = dummy_in_data;
+  oram -> dummy_out_data = dummy_out_data;
+  oram -> in_tag = in_tag;
+  oram -> out_tag = out_tag;
+  oram -> DATA_SIZE = DATA_SIZE;
+  oram -> ORAM_TYPE = ORAM_TYPE;
+  oram -> zt_id = zt_id;
+  oram -> enc_request_size = enc_request_size;
+  return oram;
+}
+
+void free_oram(Oram *oram){
+  free(oram -> enc_request);
+  free(oram -> enc_response);
+  free(oram -> dummy_in_data);
+  free(oram -> dummy_out_data);
+  free(oram -> in_tag);
+  free(oram -> out_tag);
+  free(oram);
+}
 
 int initializeZeroTrace() {
   // Variables for Enclave Public Key retrieval 
@@ -82,8 +115,20 @@ int initializeZeroTrace() {
 
 }
 
+void oram_read(Oram *oram, int index, unsigned char *out_data){
+  encryptRequest(index, 'r', oram->dummy_in_data, oram->DATA_SIZE, oram->enc_request, oram->in_tag, oram->enc_request_size);
+  ZT_Access(oram->zt_id, oram->ORAM_TYPE, oram->enc_request, oram->enc_response, oram->in_tag, oram->out_tag, oram->enc_request_size, oram->DATA_SIZE, TAG_SIZE);
+  extractResponse(oram->enc_response, oram->out_tag, oram->DATA_SIZE, out_data);
+}
+
+void oram_write(Oram *oram, int index, unsigned char *in_data){
+  encryptRequest(index, 'w', in_data, oram->DATA_SIZE, oram->enc_request, oram->in_tag, oram->enc_request_size);
+  ZT_Access(oram->zt_id, oram->ORAM_TYPE, oram->enc_request, oram->enc_response, oram->in_tag, oram->out_tag, oram->enc_request_size, oram->DATA_SIZE, TAG_SIZE);
+}
+
 int main(int argc, char *argv[]) {
 
+  // start by specifying all the parameters we'll need
   uint32_t MAX_BLOCKS = 1000; //Number of data blocks in the ORAM
   uint32_t DATA_SIZE = 4096; //Size of a block (Z blocks per bucket)
   uint32_t STASH_SIZE = 150; //Refer to PathORAM and CircuitORAM papers to understand stash size bounds.
@@ -93,54 +138,31 @@ int main(int argc, char *argv[]) {
   uint32_t Z = 4; //Z is the number of blocks in a bucket of the ORAMTree, typically PathORAM uses Z=4. But Z can be adjusted to make trade-offs on the security VS performance bar. Read more about this in the original Circuit ORAM/ Path ORAM papers. 
 
   initializeZeroTrace();
- 
-  //create a new oram, referrable to its zerotrace_id (zt_id)
-  //it's unclear if multiple orams is even supported though...
-  uint32_t zt_id = ZT_New(MAX_BLOCKS, DATA_SIZE, STASH_SIZE, OBLIVIOUS_FLAG, RECURSION_DATA_SIZE, ORAM_TYPE, Z);
+  
+  // creates a pointer for the struct you need to use the new oram interface. Don't lose it!
+  Oram *oram = create_oram(MAX_BLOCKS, DATA_SIZE, STASH_SIZE, OBLIVIOUS_FLAG, RECURSION_DATA_SIZE, ORAM_TYPE, Z);
 
-  uint32_t response_size = DATA_SIZE;
-  //+1 for simplicity printing a null-terminated string
-  unsigned char *oram_output = (unsigned char*) malloc (DATA_SIZE + 1);
-  uint32_t enc_request_size = computeCiphertextSize(DATA_SIZE);
-  unsigned char *enc_request = (unsigned char *) malloc (enc_request_size);				
-  unsigned char *enc_response = (unsigned char *) malloc (response_size);
-
+  // buffers for writing and reading data respectively
   unsigned char *in_data  = (unsigned char*) malloc (DATA_SIZE);
-  unsigned char *in_tag = (unsigned char*) malloc (TAG_SIZE); //in_tag and out_tag are used for authenticated encryption
-  unsigned char *out_data  = (unsigned char*) malloc (DATA_SIZE+1);
-  unsigned char *out_tag = (unsigned char*) malloc (TAG_SIZE);
+  unsigned char *out_data  = (unsigned char*) malloc (DATA_SIZE);
+
+  // create some identifiable data to write to the oram
   strcpy((char*) in_data, "I am heatmap data or smth");
-  //strcpy((char*) in_tag, "Arbitrary Tag"); // (this probably gets overridden)
-  // encrypt the request before sending it to the enclave
-  // use 'r' for read and 'w' for write. First arg is the index you're accessing
-  encryptRequest(0, 'w', in_data, DATA_SIZE, enc_request, in_tag, enc_request_size);
-  // ZT_Access handles both reads and writes
-  ZT_Access(zt_id, ORAM_TYPE, enc_request, enc_response, in_tag, out_tag, enc_request_size, response_size, TAG_SIZE);
-  // ignore enc_response for now
+  oram_write(oram, 0, in_data);
 
-  // now let's write some other data that we don't care about
-  // in_tag and out_tag only need to stay around for the duration of the access, so it's okay to overwrite these
-  // (same with enc_request and enc_response)
-  unsigned char *other_data  = (unsigned char*) malloc (DATA_SIZE);
-  strcpy((char*) other_data, "I am some other data. Don't access me!");
-  encryptRequest(1, 'w', other_data, DATA_SIZE, enc_request, in_tag, enc_request_size);
-  ZT_Access(zt_id, ORAM_TYPE, enc_request, enc_response, in_tag, out_tag, enc_request_size, response_size, TAG_SIZE);
+  // it's okay to reuse this buffer, as the data is already in the oram
+  strcpy((char*) in_data, "I am some other data");
+  oram_write(oram, 999, in_data);
 
-  
-  // now create a request to fetch the data we just wrote
-  unsigned char *enc_request2 = (unsigned char *) malloc (enc_request_size);
-  encryptRequest(0, 'r', in_data, DATA_SIZE, enc_request2, in_tag, enc_request_size);
-  ZT_Access(zt_id, ORAM_TYPE, enc_request2, enc_response, in_tag, out_tag, enc_request_size, response_size, TAG_SIZE);
-  extractResponse(enc_response, out_tag, response_size, out_data);
-
+  oram_read(oram, 0, out_data);
   printf("Obtained data : %s\n", out_data);
-  
-  free(encrypted_request);
-  free(encrypted_response);
-  free(tag_in);
-  free(tag_out);
-  free(data_in);
-  free(data_out);
+
+  oram_read(oram, 999, out_data);
+  printf("Obtained data : %s\n", out_data);
+
+  // custom function to make sure all parts of the oram struct are freed
+  free_oram(oram);
+
   return 0;
 }
 

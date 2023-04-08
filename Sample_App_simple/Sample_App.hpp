@@ -38,24 +38,21 @@
 EC_KEY *ENCLAVE_PUBLIC_KEY = NULL;
 unsigned char *enclave_public_key;
 
-//uint32_t NUM_EXPECTED_PARAMS = 12;
-//bool RESUME_EXPERIMENT;
-//uint32_t DATA_SIZE;
-//uint32_t MAX_BLOCKS;
-//int REQUEST_LENGTH;
-//uint32_t STASH_SIZE;
-//uint32_t OBLIVIOUS_FLAG = 0;
-//uint32_t RECURSION_DATA_SIZE = 0;
-//uint32_t ORAM_TYPE = 0;
+typedef struct Oram{
+  unsigned char *enc_request;
+  unsigned char *enc_response;
+  unsigned char *dummy_in_data;
+  unsigned char *dummy_out_data;
+  unsigned char *in_tag;
+  unsigned char *out_tag;
+  uint32_t DATA_SIZE;
+  uint32_t ORAM_TYPE;
+  uint32_t zt_id;
+  uint32_t enc_request_size;
+} Oram;
 
-unsigned char *encrypted_request, *tag_in, *encrypted_response, *tag_out;
-//uint32_t request_size, response_size;
-unsigned char *data_in;
-unsigned char *data_out;
-//uint32_t bulk_batch_size=0;
-//std::string log_file;
-
-clock_t generate_request_start, generate_request_stop, extract_response_start, extract_response_stop, process_request_start, process_request_stop, generate_request_time, extract_response_time,  process_request_time;
-//uint8_t Z;
-//FILE *iquery_file; 
-
+void oram_read(Oram *oram, int index, unsigned char *out_data);
+void oram_write(Oram *oram, int index, unsigned char *in_data);
+Oram* create_oram(uint32_t MAX_BLOCKS, uint32_t DATA_SIZE, uint32_t STASH_SIZE, uint32_t OBLIVIOUS_FLAG, uint32_t RECURSION_DATA_SIZE, uint32_t ORAM_TYPE, uint32_t Z);
+void free_oram(Oram *oram);
+int initializeZeroTrace();
