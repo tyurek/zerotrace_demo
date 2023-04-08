@@ -15,9 +15,9 @@
 *    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "../Globals.hpp"
-#include "../CONFIG.h"
-#include "../CONFIG_FLAGS.h"
+#include "Globals.hpp"
+#include "CONFIG.h"
+#include "CONFIG_FLAGS.h"
 #include "utils.hpp"
 #include <stdio.h>
 #include <stdlib.h>
